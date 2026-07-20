@@ -1,0 +1,6 @@
+{
+  "name": "LM Link",
+  "description": "Load models on remote machines and use them as if they are local. End-to-end encrypted private AI network, powered by Tailscale.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
