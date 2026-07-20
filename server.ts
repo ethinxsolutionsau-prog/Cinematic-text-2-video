@@ -8,8 +8,26 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Resolve filename and dirname safely for both ESM (tsx) and CJS (esbuild bundle)
+const getPaths = () => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      const filename = fileURLToPath(import.meta.url);
+      return {
+        filename,
+        dirname: path.dirname(filename)
+      };
+    }
+  } catch (e) {
+    // ignore
+  }
+  return {
+    filename: typeof __filename !== 'undefined' ? __filename : '',
+    dirname: typeof __dirname !== 'undefined' ? __dirname : process.cwd()
+  };
+};
+
+const { filename: resolvedFilename, dirname: resolvedDirname } = getPaths();
 
 const app = express();
 const PORT = 3000;
