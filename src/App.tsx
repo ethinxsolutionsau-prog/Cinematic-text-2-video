@@ -68,6 +68,13 @@ export default function App() {
   const [customKey, setCustomKey] = useState<string>("");
   const [keyError, setKeyError] = useState<string>("");
 
+  // Mode Selection State ('lm-link' = remote mesh, 'local' = local machine execution)
+  const [currentMode, setCurrentMode] = useState<'lm-link' | 'local'>('lm-link');
+  const [isSwitchingMode, setIsSwitchingMode] = useState<boolean>(false);
+  const [targetMode, setTargetMode] = useState<'lm-link' | 'local' | null>(null);
+  const [transitionProgress, setTransitionProgress] = useState<number>(0);
+  const [transitionLog, setTransitionLog] = useState<string[]>([]);
+
   // Devices State
   const [devices, setDevices] = useState<Device[]>([
     {
@@ -213,6 +220,62 @@ export default function App() {
         return prev + 10;
       });
     }, 150);
+  };
+
+  // Context mode switcher with highly detailed animated transition
+  const handleModeSwitch = (mode: 'lm-link' | 'local') => {
+    if (mode === currentMode) return;
+    setIsSwitchingMode(true);
+    setTargetMode(mode);
+    setTransitionProgress(0);
+    setTransitionLog([]);
+
+    const lmLinkLogs = [
+      "📡 Reading local mesh configuration handshake files...",
+      "🔑 Loading Tailscale WireGuard cryptographic auth tokens...",
+      "🔗 Initializing virtual overlay interface tunnel (utun4)...",
+      "🛡️ Establishing secure E2E double-encrypted peer-to-peer tunnels...",
+      "⚡ Pinging target GPU node: 'Office LLM Rig' [18ms latency]",
+      "📂 Loading Mistral Nemo 12B model state dynamically in remote VRAM...",
+      "✅ Context switch complete! Secure remote mesh environment linked."
+    ];
+
+    const localLogs = [
+      "⚠️ Suspending remote mesh tunnels to reclaim network bandwidth...",
+      "🔒 Flushing encrypted Tailscale VPN network packets from virtual buffer...",
+      "💻 Initializing local memory subsystem (unified system memory map)...",
+      "📦 Allocating local VRAM bounds for Llama 3.1 8B parameter weights...",
+      "⚡ Initializing Apple Metal (MPS) compiler for hardware-accelerated execution...",
+      "✅ Context switch complete! Bypassed network. Running strictly on Local Host."
+    ];
+
+    const logsToUse = mode === 'lm-link' ? lmLinkLogs : localLogs;
+    let index = 0;
+
+    const interval = setInterval(() => {
+      if (index < logsToUse.length) {
+        setTransitionLog(prev => [...prev, logsToUse[index]]);
+        setTransitionProgress(prev => Math.min((index + 1) * 15, 95));
+        index++;
+      } else {
+        clearInterval(interval);
+        setTransitionProgress(100);
+        setTimeout(() => {
+          setCurrentMode(mode);
+          // If switching to local, auto-select local device dev-1
+          if (mode === 'local') {
+            setSelectedDeviceId('dev-1');
+            setActiveModel('Llama 3.1 8B (GGUF Q4_K_M)');
+          } else {
+            // If switching to lm-link, select remote rig dev-2
+            setSelectedDeviceId('dev-2');
+            setActiveModel('Mistral Nemo 12B (Q8_0)');
+          }
+          setIsSwitchingMode(false);
+          setTargetMode(null);
+        }, 500);
+      }
+    }, 450);
   };
 
   // Remote chat submission
@@ -679,7 +742,69 @@ export default function App() {
             </div>
           ) : (
             /* Active Dashboard Interface */
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div className="space-y-6">
+              
+              {/* Context Mode Switcher Bar */}
+              <div className="bg-[#0e111a] border border-white/10 rounded-2xl p-4.5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative overflow-hidden group">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#1c2133]/10 to-transparent opacity-50 pointer-events-none" />
+                
+                <div className="flex items-center gap-3.5 relative z-10">
+                  <div className={`p-2.5 rounded-xl border flex items-center justify-center transition-all ${currentMode === 'lm-link' ? 'bg-amber-500/10 border-amber-500/30 text-amber-500 shadow-lg shadow-amber-500/5' : 'bg-purple-500/10 border-purple-500/30 text-purple-400 shadow-lg shadow-purple-500/5'}`}>
+                    {currentMode === 'lm-link' ? <Wifi className="w-5 h-5 animate-pulse" /> : <Cpu className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-display font-extrabold text-white">
+                        Active Execution Scope: {currentMode === 'lm-link' ? 'LM Link Peer Mesh' : 'Strict Local Host'}
+                      </h3>
+                      <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold tracking-wider border ${
+                        currentMode === 'lm-link' 
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
+                          : 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                      }`}>
+                        {currentMode === 'lm-link' ? 'P2P REMOTE' : 'METAL ACCELERATED'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-white/50 mt-1 max-w-2xl leading-relaxed">
+                      {currentMode === 'lm-link' 
+                        ? 'Routing AI prompts through secure WireGuard overlay tunnels to high-capacity rigs (48GB VRAM / AWS H100).' 
+                        : 'Running model parameters directly on local Unified Memory (M3 Max / Mac Studio). Completely offline, zero network roundtrip.'
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                {/* Switcher Toggle Control */}
+                <div className="bg-black/50 border border-white/5 rounded-xl p-1 flex gap-1 w-full md:w-auto shrink-0 relative z-10">
+                  <button
+                    type="button"
+                    onClick={() => handleModeSwitch('lm-link')}
+                    className={`flex-1 md:flex-initial px-4 py-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      currentMode === 'lm-link' 
+                        ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/10' 
+                        : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+                    }`}
+                  >
+                    <Wifi className="w-3.5 h-3.5" />
+                    LM Link Mode
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleModeSwitch('local')}
+                    className={`flex-1 md:flex-initial px-4 py-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      currentMode === 'local' 
+                        ? 'bg-purple-500 text-white shadow-md shadow-purple-500/10' 
+                        : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+                    }`}
+                  >
+                    <Cpu className="w-3.5 h-3.5" />
+                    Local Mode
+                  </button>
+                </div>
+              </div>
+
+              {/* Existing grid layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               
               {/* LEFT COLUMN: Node Monitors */}
               <div className="lg:col-span-5 space-y-6">
@@ -802,27 +927,51 @@ export default function App() {
                   <div className="space-y-3">
                     {devices.map((device) => {
                       const isSelected = selectedDeviceId === device.id;
+                      const isRemote = device.id !== 'dev-1';
+                      const isSuspended = currentMode === 'local' && isRemote;
                       return (
                         <div
                           key={device.id}
                           onClick={() => {
+                            if (isSuspended) {
+                              handleModeSwitch('lm-link');
+                              return;
+                            }
                             setSelectedDeviceId(device.id);
                             setActiveModel(device.loadedModel);
                           }}
                           className={`border rounded-xl p-3.5 transition-all cursor-pointer relative group ${
-                            isSelected 
-                              ? 'bg-amber-500/[0.02] border-amber-500 shadow-md shadow-amber-500/5' 
+                            isSuspended
+                              ? 'bg-black/10 border-white/5 opacity-40 hover:opacity-70'
+                              : isSelected 
+                              ? currentMode === 'local'
+                                ? 'bg-purple-500/[0.02] border-purple-500 shadow-md shadow-purple-500/5'
+                                : 'bg-amber-500/[0.02] border-amber-500 shadow-md shadow-amber-500/5' 
                               : 'bg-black/30 border-white/5 hover:border-white/10'
                           }`}
                         >
                           {/* Selected marker accent */}
-                          {isSelected && (
-                            <span className="absolute top-0 bottom-0 left-0 w-1 bg-amber-500 rounded-l-xl" />
+                          {isSelected && !isSuspended && (
+                            <span className={`absolute top-0 bottom-0 left-0 w-1 rounded-l-xl ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} />
+                          )}
+
+                          {isSuspended && (
+                            <span className="absolute top-2.5 right-2.5 text-[8px] font-mono uppercase bg-white/5 text-white/40 border border-white/10 px-1.5 py-0.5 rounded">
+                              Mesh Suspended
+                            </span>
                           )}
 
                           <div className="flex justify-between items-start">
                             <div className="flex items-center gap-2.5">
-                              <div className={`p-1.5 rounded-lg border ${isSelected ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-white/5 border-white/10 text-white/40'}`}>
+                              <div className={`p-1.5 rounded-lg border ${
+                                isSuspended
+                                  ? 'bg-white/5 border-white/10 text-white/20'
+                                  : isSelected 
+                                  ? currentMode === 'local'
+                                    ? 'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                  : 'bg-white/5 border-white/10 text-white/40'
+                              }`}>
                                 {getDeviceIcon(device.type)}
                               </div>
                               <div>
@@ -831,43 +980,53 @@ export default function App() {
                               </div>
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleUnlinkDevice(device.id);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/5 text-white/30 hover:text-red-400 transition-all cursor-pointer"
-                              title="Unlink remote node"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {!isSuspended && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUnlinkDevice(device.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/5 text-white/30 hover:text-red-400 transition-all cursor-pointer"
+                                title="Unlink remote node"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
 
                           {/* Node Health Metrics */}
                           <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-white/5 text-[9px] font-mono text-white/40">
                             <div>
                               <span>Latency</span>
-                              <span className={`block font-bold mt-0.5 ${device.latency < 10 ? 'text-green-400' : device.latency < 25 ? 'text-amber-400' : 'text-purple-400'}`}>
-                                {device.latency}ms
+                              <span className={`block font-bold mt-0.5 ${
+                                isSuspended 
+                                  ? 'text-white/20' 
+                                  : device.latency < 10 
+                                  ? 'text-green-400' 
+                                  : device.latency < 25 
+                                  ? 'text-amber-400' 
+                                  : 'text-purple-400'
+                              }`}>
+                                {isSuspended ? '—' : `${device.latency}ms`}
                               </span>
                             </div>
                             <div>
                               <span>GPU load</span>
-                              <span className="block font-bold mt-0.5 text-white">
-                                {device.load}%
+                              <span className={`block font-bold mt-0.5 ${isSuspended ? 'text-white/20' : 'text-white'}`}>
+                                {isSuspended ? '—' : `${device.load}%`}
                               </span>
                             </div>
                             <div>
                               <span>Temp</span>
-                              <span className="block font-bold mt-0.5 text-white">
-                                {device.temp}°C
+                              <span className={`block font-bold mt-0.5 ${isSuspended ? 'text-white/20' : 'text-white'}`}>
+                                {isSuspended ? '—' : `${device.temp}°C`}
                               </span>
                             </div>
                             <div>
                               <span>Tunnel Link</span>
-                              <span className="block text-green-400 font-bold mt-0.5">
-                                SECURE
+                              <span className={`block font-bold mt-0.5 ${isSuspended ? 'text-white/20' : 'text-green-400'}`}>
+                                {isSuspended ? 'OFFLINE' : 'SECURE'}
                               </span>
                             </div>
                           </div>
@@ -875,7 +1034,13 @@ export default function App() {
                           {/* Loaded Model block */}
                           <div className="mt-3 bg-black/40 border border-white/5 rounded-lg p-2 flex justify-between items-center text-[10px] font-mono">
                             <span className="text-white/40">Loaded:</span>
-                            <span className="text-amber-500 font-bold truncate max-w-[200px]" title={device.loadedModel}>
+                            <span className={`font-bold truncate max-w-[200px] ${
+                              isSuspended 
+                                ? 'text-white/25' 
+                                : currentMode === 'local'
+                                ? 'text-purple-400'
+                                : 'text-amber-500'
+                            }`} title={device.loadedModel}>
                               {device.loadedModel}
                             </span>
                           </div>
@@ -915,18 +1080,28 @@ export default function App() {
                 <div className="bg-[#0e111a] border border-white/10 rounded-2xl p-5 space-y-4">
                   <div className="flex justify-between items-center">
                     <div>
-                      <span className="text-[10px] font-mono uppercase tracking-widest text-white/40 block">Target Node & Loaded Model</span>
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-white/40 block">
+                        {currentMode === 'local' ? 'Local Compute Target' : 'Target Node & Loaded Model'}
+                      </span>
                       <h3 className="text-sm font-bold text-white">
                         {devices.find(d => d.id === selectedDeviceId)?.name || 'Default Node'}
                       </h3>
                     </div>
-                    <span className="flex items-center gap-1 text-[9px] font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" /> P2P ONLINE
-                    </span>
+                    {currentMode === 'local' ? (
+                      <span className="flex items-center gap-1 text-[9px] font-mono text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" /> LOCAL CORE
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[9px] font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" /> P2P ONLINE
+                      </span>
+                    )}
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[10px] font-mono text-white/40 uppercase tracking-widest block">Select remote GGUF model to load into VRAM:</label>
+                    <label className="text-[10px] font-mono text-white/40 uppercase tracking-widest block">
+                      {currentMode === 'local' ? 'Select local GGUF model to load into Unified RAM:' : 'Select remote GGUF model to load into VRAM:'}
+                    </label>
                     <div className="flex flex-wrap gap-2">
                       {devices.find(d => d.id === selectedDeviceId)?.supportedModels.map((model) => {
                         const isLoaded = activeModel === model;
@@ -938,7 +1113,9 @@ export default function App() {
                             disabled={isSwappingModel}
                             className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all border cursor-pointer ${
                               isLoaded 
-                                ? 'bg-amber-500/15 border-amber-500 text-amber-400 shadow-sm shadow-amber-500/5' 
+                                ? currentMode === 'local'
+                                  ? 'bg-purple-500/15 border-purple-500 text-purple-400 shadow-sm shadow-purple-500/5'
+                                  : 'bg-amber-500/15 border-amber-500 text-amber-400 shadow-sm shadow-amber-500/5' 
                                 : 'bg-black/30 border-white/5 text-white/50 hover:border-white/10 hover:text-white'
                             }`}
                           >
@@ -953,14 +1130,14 @@ export default function App() {
                   {isSwappingModel && (
                     <div className="space-y-1.5 font-mono">
                       <div className="flex justify-between items-center text-[10px] text-white/40">
-                        <span className="flex items-center gap-1.5 text-amber-500 font-semibold animate-pulse">
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Instantiating model weights in remote GPU memory...
+                        <span className={`flex items-center gap-1.5 font-semibold animate-pulse ${currentMode === 'local' ? 'text-purple-400' : 'text-amber-500'}`}>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {currentMode === 'local' ? 'Instantiating model weights in local system RAM...' : 'Instantiating model weights in remote GPU memory...'}
                         </span>
                         <span>{swapProgress}%</span>
                       </div>
                       <div className="w-full bg-[#161a23] rounded-full h-1.5 overflow-hidden">
                         <motion.div 
-                          className="bg-amber-500 h-full rounded-full"
+                          className={`h-full rounded-full ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`}
                           initial={{ width: '0%' }}
                           animate={{ width: `${swapProgress}%` }}
                           transition={{ duration: 0.15 }}
@@ -977,13 +1154,23 @@ export default function App() {
                   <div className="border-b border-white/5 px-5 py-4 bg-[#0a0c12] flex justify-between items-center">
                     <div className="flex items-center gap-2">
                       <div className="relative">
-                        <Terminal className="w-4 h-4 text-amber-500" />
-                        <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                        <Terminal className={`w-4 h-4 ${currentMode === 'local' ? 'text-purple-400' : 'text-amber-500'}`} />
+                        <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full animate-ping ${currentMode === 'local' ? 'bg-purple-400' : 'bg-amber-400'}`} />
                       </div>
                       <div>
-                        <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-white">Private Link Decrypted Session</h4>
+                        <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-white">
+                          {currentMode === 'local' ? 'Local Hardware Console Session' : 'Private Link Decrypted Session'}
+                        </h4>
                         <span className="text-[10px] text-white/40 font-mono flex items-center gap-1">
-                          <Lock className="w-3 h-3 text-amber-500 inline" /> Direct peer-to-peer connection is encrypted end-to-end
+                          {currentMode === 'local' ? (
+                            <>
+                              <Lock className="w-3 h-3 text-purple-400 inline" /> Bypassing mesh network • Apple Metal hardware acceleration
+                            </>
+                          ) : (
+                            <>
+                              <Lock className="w-3 h-3 text-amber-500 inline" /> Direct peer-to-peer connection is encrypted end-to-end
+                            </>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -1001,18 +1188,18 @@ export default function App() {
                   {/* Packet flow routing animation banner */}
                   <div className="bg-black/40 border-b border-white/5 px-5 py-1.5 text-[9px] font-mono text-white/30 flex justify-between items-center relative overflow-hidden">
                     <span className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                      <span className={`w-1.5 h-1.5 rounded-full ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} />
                       Client: Localhost
                     </span>
                     
                     {/* Tunnel line graphic */}
                     <div className="flex-1 mx-4 h-[1px] relative flex items-center bg-white/5">
-                      <span className={`h-1 bg-amber-500 absolute rounded-full transition-all duration-1000 ${dataPacketPulse ? 'w-full animate-pulse' : 'w-0'}`} />
+                      <span className={`h-1 absolute rounded-full transition-all duration-1000 ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'} ${dataPacketPulse ? 'w-full animate-pulse' : 'w-0'}`} />
                     </div>
 
-                    <span className="flex items-center gap-1 text-amber-500/80">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                      Remote: {devices.find(d => d.id === selectedDeviceId)?.name.split(' ')[0] || 'Node'}
+                    <span className={`flex items-center gap-1 ${currentMode === 'local' ? 'text-purple-400' : 'text-amber-500/80'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${currentMode === 'local' ? 'bg-purple-400' : 'bg-amber-400'}`} />
+                      {currentMode === 'local' ? 'Direct metal system bus loopback' : `Remote: ${devices.find(d => d.id === selectedDeviceId)?.name.split(' ')[0] || 'Node'}`}
                     </span>
                   </div>
 
@@ -1022,8 +1209,13 @@ export default function App() {
                       <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
                         <Terminal className="w-10 h-10 text-white/10" />
                         <div className="space-y-1">
-                          <p className="text-xs font-mono text-white/40">Secure P2P Console established.</p>
-                          <p className="text-[11px] text-white/30">Your chats are processed strictly locally. Heavy parameters are computed on your linked hardware.</p>
+                          <p className="text-xs font-mono text-white/40">Secure Console established.</p>
+                          <p className="text-[11px] text-white/30">
+                            {currentMode === 'local' 
+                              ? "Your chats are processed strictly locally. Large parameters are computed on local system memory via Apple Metal (MPS)."
+                              : "Your chats are processed strictly locally. Heavy parameters are computed on your linked remote hardware."
+                            }
+                          </p>
                         </div>
                       </div>
                     ) : (
@@ -1040,7 +1232,7 @@ export default function App() {
                             {msg.role === 'assistant' && (
                               <>
                                 <span>•</span>
-                                <span className="text-amber-500 font-semibold">{msg.modelUsed}</span>
+                                <span className={`${currentMode === 'local' ? 'text-purple-400' : 'text-amber-500'} font-semibold`}>{msg.modelUsed}</span>
                                 <span>•</span>
                                 <span className="text-white/40 uppercase">{msg.deviceUsed?.split(' ')[0]}</span>
                               </>
@@ -1051,7 +1243,9 @@ export default function App() {
                           <div
                             className={`max-w-[85%] rounded-xl px-4 py-3 text-xs leading-relaxed ${
                               msg.role === 'user'
-                                ? 'bg-amber-600/10 border border-amber-500/20 text-white'
+                                ? currentMode === 'local'
+                                  ? 'bg-purple-600/10 border border-purple-500/20 text-white'
+                                  : 'bg-amber-600/10 border border-amber-500/20 text-white'
                                 : 'bg-white/[0.03] border border-white/5 text-white/90'
                             }`}
                           >
@@ -1060,8 +1254,12 @@ export default function App() {
 
                           {/* Connection Latency indicator */}
                           {msg.role === 'assistant' && msg.latencyMs && (
-                            <span className="text-[8px] font-mono text-amber-500/60 px-1">
-                              ⚡ Connection roundtrip: {msg.latencyMs}ms • End-to-end Encrypted Tunnel
+                            <span className={`text-[8px] font-mono px-1 ${currentMode === 'local' ? 'text-purple-400/60' : 'text-amber-500/60'}`}>
+                              {currentMode === 'local' ? (
+                                <>⚡ Connection latency: 0.12ms (Direct system bus loopback) • Local system RAM</>
+                              ) : (
+                                <>⚡ Connection roundtrip: {msg.latencyMs}ms • End-to-end Encrypted Tunnel</>
+                              )}
                             </span>
                           )}
                         </div>
@@ -1071,17 +1269,19 @@ export default function App() {
                     {/* Pending state */}
                     {isGenerating && (
                       <div className="flex flex-col space-y-1.5 items-start">
-                        <div className="flex items-center gap-2 text-[9px] font-mono text-amber-500/60">
+                        <div className={`flex items-center gap-2 text-[9px] font-mono ${currentMode === 'local' ? 'text-purple-400/60' : 'text-amber-500/60'}`}>
                           <RefreshCw className="w-3 h-3 animate-spin" />
-                          <span>Routing packets via Tailscale private mesh...</span>
+                          <span>
+                            {currentMode === 'local' ? 'Streaming local token sequence from system RAM...' : 'Routing packets via Tailscale private mesh...'}
+                          </span>
                         </div>
                         <div className="bg-white/[0.02] border border-white/5 rounded-xl px-4 py-3 text-xs text-white/50 italic flex items-center gap-2">
                           <span className="flex gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                            <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} style={{ animationDelay: '0ms' }} />
+                            <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} style={{ animationDelay: '150ms' }} />
+                            <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} style={{ animationDelay: '300ms' }} />
                           </span>
-                          Remote inference executing...
+                          {currentMode === 'local' ? 'Local Apple MPS inference executing...' : 'Remote inference executing...'}
                         </div>
                       </div>
                     )}
@@ -1111,14 +1311,14 @@ export default function App() {
                       placeholder={
                         isSwappingModel 
                           ? "Please wait for model load to complete..." 
-                          : `Type a prompt to send securely to remote ${activeModel.split(' ')[0]}...`
+                          : `Type a prompt to send securely to local ${activeModel.split(' ')[0]}...`
                       }
-                      className="flex-1 bg-[#090a0f] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-amber-500/40 outline-none placeholder:text-white/20 font-mono disabled:opacity-40"
+                      className={`flex-1 bg-[#090a0f] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white outline-none placeholder:text-white/20 font-mono disabled:opacity-40 transition-colors ${currentMode === 'local' ? 'focus:border-purple-500/40' : 'focus:border-amber-500/40'}`}
                     />
                     <button
                       type="submit"
                       disabled={!inputMessage.trim() || isGenerating || isSwappingModel}
-                      className="p-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold disabled:opacity-30 cursor-pointer transition-all active:scale-95 flex items-center justify-center shrink-0"
+                      className={`p-2.5 rounded-xl font-bold disabled:opacity-30 cursor-pointer transition-all active:scale-95 flex items-center justify-center shrink-0 ${currentMode === 'local' ? 'bg-purple-500 hover:bg-purple-400 text-white shadow-md shadow-purple-500/10' : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/10'}`}
                     >
                       <Send className="w-4 h-4" />
                     </button>
@@ -1128,6 +1328,7 @@ export default function App() {
               </div>
 
             </div>
+          </div>
           )}
         </section>
 
@@ -1530,6 +1731,78 @@ export default function App() {
           Tailscale is a trademark of Tailscale, Inc. WireGuard is a registered trademark of Jason A. Donenfeld. All data transfer is computed on device clusters.
         </p>
       </footer>
+
+      {/* Transition Modal Overlay */}
+      <AnimatePresence>
+        {isSwitchingMode && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-[#07090d]/90 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-[#0e111a] border border-white/10 rounded-2xl w-full max-w-lg p-6 md:p-8 space-y-6 shadow-2xl relative overflow-hidden text-center"
+            >
+              <div className="absolute inset-0 bg-radial-gradient(circle_at_top,rgba(168,85,247,0.05),transparent_70%) pointer-events-none" />
+              
+              <div className="space-y-4 relative z-10">
+                {/* Mode indicators */}
+                <div className="flex justify-center items-center gap-6">
+                  <div className={`p-3 rounded-xl border flex items-center justify-center transition-all duration-300 ${
+                    targetMode === 'lm-link' 
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' 
+                      : 'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                  }`}>
+                    {targetMode === 'lm-link' ? <Wifi className="w-6 h-6 animate-pulse" /> : <Cpu className="w-6 h-6" />}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-white/40 block">Handshaking New Compute Target</span>
+                  <h3 className="text-lg font-display font-extrabold text-white">
+                    Switching to {targetMode === 'lm-link' ? 'LM Link Remote Mesh' : 'Strict Local Mode'}
+                  </h3>
+                </div>
+
+                {/* Simulated log output stream */}
+                <div className="bg-black/40 border border-white/5 rounded-xl p-4 h-[160px] overflow-y-auto text-left font-mono text-[10px] space-y-2 select-none scrollbar-none">
+                  {transitionLog.map((log, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, x: -5 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className={`${log.includes('✅') ? 'text-green-400 font-bold' : log.includes('⚠️') ? 'text-amber-400' : 'text-white/60'}`}
+                    >
+                      {log}
+                    </motion.div>
+                  ))}
+                  {transitionProgress < 100 && (
+                    <span className="inline-block w-1.5 h-3 bg-white/50 animate-pulse" />
+                  )}
+                </div>
+
+                {/* Custom system hardware status bar */}
+                <div className="space-y-1.5 font-mono">
+                  <div className="flex justify-between items-center text-[10px] text-white/40">
+                    <span>PROGRESS STATUS</span>
+                    <span>{transitionProgress}%</span>
+                  </div>
+                  <div className="w-full bg-[#161a23] rounded-full h-1.5 overflow-hidden">
+                    <motion.div 
+                      className={`h-full rounded-full transition-all duration-300 ${targetMode === 'lm-link' ? 'bg-amber-500' : 'bg-purple-500'}`}
+                      style={{ width: `${transitionProgress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
