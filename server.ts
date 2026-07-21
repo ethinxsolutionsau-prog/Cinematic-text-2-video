@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
+import OpenAI from 'openai';
 import { Readable } from 'stream';
 import dotenv from 'dotenv';
 
@@ -30,7 +31,7 @@ const getPaths = () => {
 const { filename: resolvedFilename, dirname: resolvedDirname } = getPaths();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
 
@@ -52,7 +53,7 @@ interface VideoJob {
 
 const jobs: Record<string, VideoJob> = {};
 
-// Initialize Gemini SDK lazily
+// Initialize Gemini SDK lazily (used for Veo video generation)
 let aiClient: GoogleGenAI | null = null;
 
 function getAI(): GoogleGenAI {
@@ -73,22 +74,46 @@ function getAI(): GoogleGenAI {
   return aiClient;
 }
 
-// Check if Gemini API key is configured
+// Initialize Groq SDK lazily (OpenAI-compatible, used for chat)
+let groqClient: OpenAI | null = null;
+
+function getGroq(): OpenAI {
+  if (!groqClient) {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      throw new Error('GROQ_API_KEY environment variable is required for chat');
+    }
+    groqClient = new OpenAI({
+      apiKey,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
+  }
+  return groqClient;
+}
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Check if API keys are configured
 app.get('/api/config-status', (req, res) => {
-  const hasKey = !!process.env.GEMINI_API_KEY;
-  res.json({ configured: hasKey });
+  res.json({
+    geminiConfigured: !!process.env.GEMINI_API_KEY,
+    groqConfigured: !!process.env.GROQ_API_KEY,
+  });
 });
 
 // Get workspace settings including models and prices from environment variables
 app.get('/api/settings', (req, res) => {
   res.json({
     videoModel: process.env.VIDEO_GENERATION_MODEL || 'veo-3.1-fast-generate-preview',
-    chatModel: process.env.CHAT_ASSISTANT_MODEL || 'gemini-2.5-flash',
+    chatModel: process.env.CHAT_MODEL || process.env.CHAT_ASSISTANT_MODEL || 'llama-3.1-70b-versatile',
     subscriptionPrice: process.env.SUBSCRIPTION_PRICE_REFERENCE || '$5.50/month',
   });
 });
 
-// AI Assistant Chat Proxy
+// AI Assistant Chat Proxy — uses Groq
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages, model, subscriptionPrice, videoModel } = req.body;
@@ -96,9 +121,9 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Messages array is required' });
     }
 
-    const ai = getAI();
-    
-    const activeChatModel = model || process.env.CHAT_ASSISTANT_MODEL || 'gemini-2.5-flash';
+    const groq = getGroq();
+
+    const activeChatModel = model || process.env.CHAT_MODEL || process.env.CHAT_ASSISTANT_MODEL || 'llama-3.3-70b-versatile';
     const activeVideoModel = videoModel || process.env.VIDEO_GENERATION_MODEL || 'veo-3.1-fast-generate-preview';
     const activePrice = subscriptionPrice || process.env.SUBSCRIPTION_PRICE_REFERENCE || '$5.50/month';
 
@@ -123,31 +148,29 @@ CURRENT ENVIRONMENT SPECS:
 
 Keep your answers warm, inspiring, detailed, and incredibly creative. Encourage the user to bring their wildest visions to life! Ensure you speak like a supportive, enthusiastic mentor. Use standard formatting and paragraph breaks. No technical system paths or code snippets unless they explicitly ask.`;
 
-    const contents = [
-      { role: 'user', parts: [{ text: systemPrompt }] },
+    const chatMessages = [
+      { role: 'system', content: systemPrompt },
       ...messages.map((m: any) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content || m.text || '' }]
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content || m.text || ''
       }))
     ];
 
-    const response = await ai.models.generateContent({
+    const response = await groq.chat.completions.create({
       model: activeChatModel,
-      contents: contents,
-      config: {
-        maxOutputTokens: 800,
-        temperature: 0.7,
-      }
+      messages: chatMessages as any,
+      temperature: 0.7,
+      max_tokens: 800,
     });
 
-    res.json({ text: response.text });
+    res.json({ text: response.choices[0].message.content });
   } catch (error: any) {
     console.error('Error in chat assistant:', error);
     res.status(500).json({ error: error.message || 'The Forge Master has encountered a transient spark issue. Please try again!' });
   }
 });
 
-// LM Link remote simulated chat proxy
+// LM Link remote simulated chat proxy — uses Groq
 app.post('/api/lm-link/chat', async (req, res) => {
   try {
     const { messages, deviceName, modelName } = req.body;
@@ -155,8 +178,8 @@ app.post('/api/lm-link/chat', async (req, res) => {
       return res.status(400).json({ error: 'Messages array is required' });
     }
 
-    const ai = getAI();
-    
+    const groq = getGroq();
+
     const systemPrompt = `You are a simulated remote AI model running over LM Link.
 The user is talking to:
 - Model Name: ${modelName || 'Llama 3 8B'}
@@ -166,24 +189,22 @@ Keep your personality strictly aligned with ${modelName || 'Llama 3'}.
 Answer the user's prompt nicely, demonstrating that you are a real model loaded and running on the remote hardware.
 Provide clean, well-formatted, friendly, helpful, and highly insightful responses. Keep it proportional and professional.`;
 
-    const contents = [
-      { role: 'user', parts: [{ text: systemPrompt }] },
+    const chatMessages = [
+      { role: 'system', content: systemPrompt },
       ...messages.map((m: any) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content || m.text || '' }]
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content || m.text || ''
       }))
     ];
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
-      contents: contents,
-      config: {
-        maxOutputTokens: 800,
-        temperature: 0.7,
-      }
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: chatMessages as any,
+      temperature: 0.7,
+      max_tokens: 800,
     });
 
-    res.json({ text: response.text });
+    res.json({ text: response.choices[0].message.content });
   } catch (error: any) {
     console.error('Error in LM Link chat:', error);
     res.status(500).json({ error: error.message || 'LM Link connection timed out. Please check if your remote Tailscale node is online.' });
@@ -195,7 +216,7 @@ app.get('/api/jobs', (req, res) => {
   res.json({ jobs: Object.values(jobs).sort((a, b) => b.createdAt - a.createdAt) });
 });
 
-// Start video generation
+// Start video generation — stays on Gemini/Veo
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, aspectRatio, resolution, durationSeconds, model, firstFrame, lastFrame } = req.body;
@@ -278,7 +299,7 @@ app.post('/api/generate-video', async (req, res) => {
   }
 });
 
-// Check status of a specific job
+// Check status of a specific job — stays on Gemini
 app.post('/api/video-status', async (req, res) => {
   try {
     const { jobId, operationName } = req.body;
@@ -325,7 +346,7 @@ app.post('/api/video-status', async (req, res) => {
   }
 });
 
-// Securely stream video from Veo Google Cloud Storage URI
+// Securely stream video from Veo Google Cloud Storage URI — stays on Gemini
 app.get('/api/video-stream', async (req, res) => {
   try {
     const operationName = req.query.operationName as string;
