@@ -400,7 +400,10 @@ app.get('/api/video-stream', async (req, res) => {
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: ['cinematic.ethinx.solutions', '91.99.162.243', 'localhost'],
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
