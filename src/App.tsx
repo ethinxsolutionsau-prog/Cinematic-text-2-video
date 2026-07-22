@@ -32,9 +32,18 @@ import {
   CheckCircle2,
   AlertTriangle,
   Info,
-  Users
+  Users,
+  Film,
+  Play,
+  Video,
+  Image,
+  Sliders,
+  Flame,
+  Wand2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import CinemaStudio from './components/CinemaStudio';
+import SecurityDashboard from './components/SecurityDashboard';
 
 interface Device {
   id: string;
@@ -57,9 +66,22 @@ interface Message {
   latencyMs?: number;
   deviceUsed?: string;
   modelUsed?: string;
+  tokens?: {
+    prompt: number;
+    completion: number;
+    total: number;
+  };
+  cost?: number;
+  savedAmount?: number;
 }
 
 export default function App() {
+  // Navigation Tabs & Copilot Mode
+  const [activeTab, setActiveTab] = useState<'cinema-studio' | 'lm-link'>('cinema-studio');
+  const [copilotMode, setCopilotMode] = useState<'forge-master' | 'lm-link'>('forge-master');
+  const [chatModel, setChatModel] = useState<string>('gemini-2.5-flash');
+  const [videoPrompt, setVideoPrompt] = useState<string>("");
+
   // Onboarding & Mesh Link State
   const [isLinked, setIsLinked] = useState<boolean>(false);
   const [meshName, setMeshName] = useState<string>("Personal AI Grid");
@@ -74,6 +96,35 @@ export default function App() {
   const [targetMode, setTargetMode] = useState<'lm-link' | 'local' | null>(null);
   const [transitionProgress, setTransitionProgress] = useState<number>(0);
   const [transitionLog, setTransitionLog] = useState<string[]>([]);
+
+  // Token & Cost Tracking Configuration
+  const [modelRates, setModelRates] = useState<Record<string, { input: number; output: number }>>({
+    'Mistral Nemo 12B (Q8_0)': { input: 0.15, output: 0.60 }, // Price in USD per 1,000,000 tokens
+    'Llama 3.1 8B (GGUF Q4_K_M)': { input: 0.10, output: 0.40 },
+    'Gemma 2 9B (GGUF Q4)': { input: 0.10, output: 0.40 },
+    'DeepSeek V3 671B (ExL2)': { input: 2.00, output: 8.00 },
+    'Phi-3 Mini (Q4)': { input: 0.05, output: 0.20 }
+  });
+
+  // Base historic metrics to simulate previous sessions (can be reset by the user)
+  const [baselineMetrics, setBaselineMetrics] = useState({
+    promptTokens: 4120,
+    completionTokens: 8540,
+    cost: 0.01254,
+    saved: 0.03240
+  });
+
+  const [showTelemetryDetails, setShowTelemetryDetails] = useState<boolean>(false);
+  const [isEditingRates, setIsEditingRates] = useState<boolean>(false);
+
+  // Bottom Page Modals & Interaction States
+  const [activeModal, setActiveModal] = useState<'pricing' | 'affiliate' | 'legal' | 'contact' | null>(null);
+  const [affiliateCode, setAffiliateCode] = useState<string>("");
+  const [copiedAffiliate, setCopiedAffiliate] = useState<boolean>(false);
+  const [contactFormSubmitted, setContactFormSubmitted] = useState<boolean>(false);
+  const [contactSubject, setContactSubject] = useState<string>("general");
+  const [contactMessage, setContactMessage] = useState<string>("");
+  const [contactEmail, setContactEmail] = useState<string>("");
 
   // Devices State
   const [devices, setDevices] = useState<Device[]>([
@@ -126,11 +177,18 @@ export default function App() {
     {
       id: 'msg-init-1',
       role: 'assistant',
-      content: 'Hello! I am running on your Office LLM Rig. I can process your prompts remotely over your secure end-to-end encrypted Tailscale link. What can I help you build or code today?',
-      timestamp: new Date(Date.now() - 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      deviceUsed: 'Office LLM Rig (Remote)',
-      modelUsed: 'Mistral Nemo 12B (Q8_0)',
-      latencyMs: 18
+      content: 'Greetings, Creator! I am the Video Forge Master, your cybernetic wizard and co-director. Embedded deep within the FLUX.CINEMA workstation, I am ready to help you forge majestic, photorealistic cinematic masterworks. Ask me for visual story ideas, character blueprints, camera directions, or prompt scripts (which I will provide in double quotes so you can apply them to the studio with 1 click!). What visual dream shall we materialize today?',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      deviceUsed: 'Forge Core Studio',
+      modelUsed: 'Video Forge Master',
+      latencyMs: 120,
+      tokens: {
+        prompt: 0,
+        completion: 82,
+        total: 82
+      },
+      cost: 0.000049,
+      savedAmount: 0
     }
   ]);
   const [inputMessage, setInputMessage] = useState<string>("");
@@ -151,6 +209,33 @@ export default function App() {
   });
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Derived usage and cost statistics computed dynamically from session chatMessages
+  const totalPromptTokens = baselineMetrics.promptTokens + chatMessages.reduce((sum, m) => sum + (m.tokens?.prompt || 0), 0);
+  const totalCompletionTokens = baselineMetrics.completionTokens + chatMessages.reduce((sum, m) => sum + (m.tokens?.completion || 0), 0);
+  const totalTokens = totalPromptTokens + totalCompletionTokens;
+
+  const totalCost = baselineMetrics.cost + chatMessages.reduce((sum, m) => sum + (m.cost || 0), 0);
+  const totalSaved = baselineMetrics.saved + chatMessages.reduce((sum, m) => sum + (m.savedAmount || 0), 0);
+
+  // Local efficiency rate (percentage of tokens processed locally / at $0 cost)
+  const localTokens = chatMessages.filter(m => m.savedAmount && m.savedAmount > 0).reduce((sum, m) => sum + (m.tokens?.total || 0), 0);
+  const localComputeRatio = totalTokens > 0 
+    ? ((localTokens + 6500) / (totalTokens + 6500)) * 100 
+    : 100;
+
+  const transactions = chatMessages
+    .filter(m => m.tokens)
+    .map(m => ({
+      id: m.id,
+      timestamp: m.timestamp,
+      model: m.modelUsed,
+      tokens: m.tokens,
+      cost: m.cost,
+      saved: m.savedAmount,
+      isLocal: m.savedAmount !== undefined && m.savedAmount > 0
+    }))
+    .reverse();
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -299,17 +384,6 @@ export default function App() {
     setDataPacketPulse(true);
     setTimeout(() => setDataPacketPulse(false), 2000);
 
-    // Find selected device details
-    const activeDevice = devices.find(d => d.id === selectedDeviceId) || devices[0];
-
-    // Simulate device loading metrics
-    setDevices(prev => prev.map(d => {
-      if (d.id === selectedDeviceId) {
-        return { ...d, load: Math.floor(Math.random() * 20) + 75, temp: d.temp + 4 };
-      }
-      return d;
-    }));
-
     try {
       // Prepare previous messages for context
       const apiMessages = chatMessages.concat(userMsg).map(m => ({
@@ -317,51 +391,55 @@ export default function App() {
         content: m.content
       }));
 
-      const res = await fetch('/api/lm-link/chat', {
+      // Send to Video Forge Master Chat Proxy
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: apiMessages,
-          deviceName: activeDevice.name,
-          modelName: activeModel
+          model: chatModel,
+          subscriptionPrice: '$5.50/month',
+          videoModel: 'veo-3.1-fast-generate-preview'
         })
       });
 
       if (!res.ok) {
-        throw new Error('Mesh node did not respond in time.');
+        throw new Error('The Forge Master core did not respond in time.');
       }
-
       const data = await res.json();
 
-      // update current device stats back to normal load
-      setDevices(prev => prev.map(d => {
-        if (d.id === selectedDeviceId) {
-          return { ...d, load: Math.floor(Math.random() * 5) + 3, temp: Math.max(d.temp - 2, 40) };
-        }
-        return d;
-      }));
+      // Calculate token counts and cost for this execution
+      const promptToks = data.usage?.promptTokens || Math.ceil(userMsg.content.length / 3.8);
+      const completionToks = data.usage?.completionTokens || Math.ceil((data.text || "").length / 3.8);
+      const totalToks = promptToks + completionToks;
+
+      const activeRate = { input: 0.15, output: 0.60 }; // Price of Gemini 2.5 Flash / Forge Core
+      const computedCost = ((promptToks * activeRate.input) + (completionToks * activeRate.output)) / 1000000;
 
       setChatMessages(prev => [...prev, {
         id: `msg-${Date.now()}-res`,
         role: 'assistant',
-        content: data.text,
+        content: data.text || data.error || 'Connection established.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        deviceUsed: activeDevice.name,
-        modelUsed: activeModel,
-        latencyMs: activeDevice.latency + Math.floor(Math.random() * 12)
+        deviceUsed: 'Forge Core Studio',
+        modelUsed: chatModel === 'gemini-2.5-flash' ? 'Video Forge Master (Gemini 2.5 Flash)' :
+                   chatModel === 'gemini-2.5-pro' ? 'Video Forge Master (Gemini 2.5 Pro)' :
+                   chatModel === 'gemini-2.0-flash' ? 'Video Forge Master (Gemini 2.0 Flash)' :
+                   chatModel === 'gemini-1.5-pro' ? 'Video Forge Master (Gemini 1.5 Pro)' :
+                   `Video Forge Master (${chatModel})`,
+        latencyMs: 120 + Math.floor(Math.random() * 50),
+        tokens: {
+          prompt: promptToks,
+          completion: completionToks,
+          total: totalToks
+        },
+        cost: computedCost,
+        savedAmount: 0
       }]);
 
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || "Failed to establish Tunnel connection with the remote host. Please verify your Tailscale node configuration.");
-      
-      // reset load
-      setDevices(prev => prev.map(d => {
-        if (d.id === selectedDeviceId) {
-          return { ...d, load: 2, temp: Math.max(d.temp - 4, 38) };
-        }
-        return d;
-      }));
+      setErrorMessage(err.message || "Failed to establish secure connection. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -440,6 +518,227 @@ export default function App() {
     }
   };
 
+  const getPromptsFromText = (text: string): string[] => {
+    const matches = text.match(/"([^"]{15,})"/g);
+    if (!matches) return [];
+    return matches.map(m => m.slice(1, -1));
+  };
+
+  const renderChatPlayground = () => {
+    return (
+      <div className="bg-[#0e111a] border border-white/10 rounded-2xl overflow-hidden flex flex-col h-[520px] shadow-2xl relative">
+        
+        {/* Chat Panel Header */}
+        <div className="border-b border-white/5 px-5 py-3 bg-[#0a0c12] flex flex-wrap justify-between items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Terminal className="w-4 h-4 text-amber-500" />
+              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full animate-ping bg-amber-400" />
+            </div>
+            <div>
+              <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-white">
+                🧙‍♂️ Video Forge Master
+              </h4>
+              <span className="text-[10px] text-white/40 font-mono flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-amber-500 inline" /> Active: {chatModel}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* LLM Engine Swapping Dropdown */}
+            <div className="flex items-center gap-1.5 bg-black/50 border border-white/10 rounded-lg px-2 py-1">
+              <span className="text-[9px] font-mono text-white/40 uppercase">Brain:</span>
+              <select
+                value={chatModel}
+                onChange={(e) => setChatModel(e.target.value)}
+                className="bg-transparent border-none text-amber-400 font-mono text-[10px] font-bold outline-none cursor-pointer focus:ring-0 py-0 pl-1 pr-5"
+                title="Swap LLM text generation model"
+              >
+                <option value="gemini-2.5-flash" className="bg-[#0e111a] text-white font-mono">Gemini 2.5 Flash</option>
+                <option value="gemini-2.5-pro" className="bg-[#0e111a] text-white font-mono">Gemini 2.5 Pro</option>
+                <option value="gemini-2.0-flash" className="bg-[#0e111a] text-white font-mono">Gemini 2.0 Flash</option>
+                <option value="gemini-1.5-pro" className="bg-[#0e111a] text-white font-mono">Gemini 1.5 Pro</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setChatMessages([])}
+              className="text-[9px] font-mono text-white/30 hover:text-white flex items-center gap-1 hover:bg-white/5 px-2 py-1.5 rounded-lg transition-colors border border-transparent hover:border-white/5"
+              title="Clear session history"
+            >
+              <Trash2 className="w-3 h-3" /> Clear Console
+            </button>
+          </div>
+        </div>
+
+        {/* Packet flow routing animation banner */}
+        <div className="bg-black/40 border-b border-white/5 px-5 py-1.5 text-[9px] font-mono text-white/30 flex justify-between items-center relative overflow-hidden">
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            Client: Localhost
+          </span>
+          
+          {/* Tunnel line graphic */}
+          <div className="flex-1 mx-4 h-[1px] relative flex items-center bg-white/5">
+            <span className={`h-1 absolute rounded-full transition-all duration-1000 bg-amber-500 ${dataPacketPulse ? 'w-full animate-pulse' : 'w-0'}`} />
+          </div>
+
+          <span className="flex items-center gap-1 text-amber-500">
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-amber-400" />
+            Direct Studio Pipe
+          </span>
+        </div>
+
+        {/* Chat Messages Log */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {chatMessages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+              <Terminal className="w-10 h-10 text-white/10" />
+              <div className="space-y-1">
+                <p className="text-xs font-mono text-white/40">Secure Console established.</p>
+                <p className="text-[11px] text-white/30 leading-normal">
+                  Welcome to the Forge Studio chat! Ask me anything about prompts, storytelling, character descriptions, lighting, or music cues.
+                </p>
+              </div>
+            </div>
+          ) : (
+            chatMessages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex flex-col space-y-1.5 ${
+                  msg.role === 'user' ? 'items-end' : 'items-start'
+                }`}
+              >
+                {/* Message Metadata line */}
+                <div className="flex items-center gap-2 text-[9px] font-mono text-white/30 px-1">
+                  <span>{msg.timestamp}</span>
+                  {msg.role === 'assistant' && (
+                    <>
+                      <span>•</span>
+                      <span className="text-amber-400 font-semibold">
+                        {msg.modelUsed || 'Video Forge Master'}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {/* Message bubble */}
+                <div
+                  className={`max-w-[85%] rounded-xl px-4 py-3 text-xs leading-relaxed ${
+                    msg.role === 'user'
+                      ? 'bg-amber-500/10 border border-amber-500/20 text-white'
+                      : 'bg-white/[0.03] border border-white/5 text-white/90'
+                  }`}
+                >
+                  {msg.content}
+
+                  {/* Visual Prompt Action Button overlay inside bubble */}
+                  {msg.role === 'assistant' && (
+                    <>
+                      {getPromptsFromText(msg.content).map((prompt, i) => (
+                        <div key={i} className="mt-2.5 bg-amber-500/15 border border-amber-500/30 rounded-lg p-2.5 flex items-center justify-between gap-3 text-left">
+                          <div className="flex-1 min-w-0 font-mono">
+                            <span className="text-[8px] font-bold text-amber-400 uppercase tracking-widest block font-sans">Prompt Seed</span>
+                            <span className="text-[10px] text-white/80 truncate block mt-0.5">"{prompt}"</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVideoPrompt(prompt);
+                              setTimeout(() => {
+                                document.getElementById('video-generator-panel')?.scrollIntoView({ behavior: 'smooth' });
+                              }, 150);
+                            }}
+                            className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[9px] font-display flex items-center gap-1 transition-all shrink-0 cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3 text-slate-950 animate-pulse" />
+                            Apply Prompt
+                          </button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+
+                {/* Connection Latency indicator */}
+                {msg.role === 'assistant' && (
+                  <div className="flex flex-col space-y-0.5">
+                    {msg.latencyMs !== undefined && (
+                      <span className="text-[8px] font-mono px-1 text-amber-500/60">
+                        ⚡ Connected directly via high-speed API Core Studio Pipe • Latency: {msg.latencyMs}ms
+                      </span>
+                    )}
+                    
+                    {msg.tokens && (
+                      <div className="flex flex-wrap items-center gap-1.5 px-1 pt-0.5">
+                        <span className="text-[8px] font-mono text-white/40 bg-white/[0.02] border border-white/5 px-1.5 py-0.5 rounded">
+                          {msg.tokens.prompt} prompt tok • {msg.tokens.completion} reply tok
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+
+          {/* Pending state */}
+          {isGenerating && (
+            <div className="flex flex-col space-y-1.5 items-start">
+              <div className="flex items-center gap-2 text-[9px] font-mono text-amber-500/60">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Streaming response from Video Forge Master Core...</span>
+              </div>
+              <div className="bg-white/[0.02] border border-white/5 rounded-xl px-4 py-3 text-xs text-white/50 italic flex items-center gap-2">
+                <span className="flex gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-amber-500" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-amber-400" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-amber-500" style={{ animationDelay: '300ms' }} />
+                </span>
+                Wizard co-director formulating concepts...
+              </div>
+            </div>
+          )}
+          
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Error alerts inside chat box */}
+        {errorMessage && (
+          <div className="mx-5 mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex gap-2.5 text-xs text-red-400">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-semibold">Support Error</p>
+              <p className="text-[11px] text-red-400/80">{errorMessage}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Message submission form */}
+        <form onSubmit={handleSendMessage} className="p-4 bg-[#0a0c12] border-t border-white/5 flex gap-2.5">
+          <input
+            type="text"
+            required
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            disabled={isGenerating}
+            placeholder="Ask Video Forge Master for storytelling concepts or prompt scripts..."
+            className="flex-1 bg-[#090a0f] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white outline-none placeholder:text-white/20 font-sans focus:border-amber-500/40 disabled:opacity-40 transition-colors"
+          />
+          <button
+            type="submit"
+            disabled={!inputMessage.trim() || isGenerating}
+            className="p-2.5 rounded-xl font-bold disabled:opacity-30 cursor-pointer transition-all active:scale-95 flex items-center justify-center shrink-0 bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/10"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#090b0f] text-white font-sans antialiased relative overflow-x-hidden selection:bg-amber-500/30 selection:text-white">
       {/* Absolute abstract grid background */}
@@ -450,50 +749,278 @@ export default function App() {
       <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-purple-500/5 rounded-full blur-[140px] pointer-events-none" />
 
       {/* Navigation Header */}
-      <header id="header-section" className="border-b border-white/5 bg-[#090b0f]/80 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex justify-between items-center transition-all">
+      <header id="header-section" className="border-b border-white/5 bg-[#090b0f]/80 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex flex-col sm:flex-row gap-4 justify-between items-center transition-all">
         <div className="flex items-center gap-3">
           <div className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-600 via-amber-500 to-amber-400 p-[1px] shadow-lg shadow-amber-500/10">
             <div className="w-full h-full bg-[#090b0f] rounded-[11px] flex items-center justify-center">
-              <Cpu className="w-4 h-4 text-amber-500 animate-pulse" />
+              <Film className="w-4 h-4 text-amber-500 animate-pulse" />
             </div>
             {/* Glowing particle ring */}
             <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-ping" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-display font-bold tracking-tight text-white text-base">LM Studio</span>
-              <span className="bg-amber-500/10 text-amber-400 font-mono text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border border-amber-500/25 tracking-widest">Link</span>
+              <span className="font-display font-bold tracking-tight text-white text-base">FLUX.CINEMA</span>
+              <span className="bg-amber-500/10 text-amber-400 font-mono text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border border-amber-500/25 tracking-widest">Studio</span>
             </div>
-            <p className="text-[10px] text-white/40 font-mono">End-to-End Encrypted AI Network</p>
+            <p className="text-[10px] text-white/40 font-mono">Veo 3.1 &amp; Decentralized Compute Mesh</p>
           </div>
         </div>
 
-        <nav className="hidden md:flex items-center gap-6">
-          <a href="#how-it-works" className="text-xs text-white/60 hover:text-white transition-colors">How it works</a>
-          <a href="#tailscale-integration" className="text-xs text-white/60 hover:text-white transition-colors">Security</a>
-          <a href="#faq" className="text-xs text-white/60 hover:text-white transition-colors">Q&A</a>
-          {isLinked && (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              {devices.length} Nodes Active
-            </div>
-          )}
-        </nav>
-
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+          <a 
+            href="#security-audit"
+            className="inline-flex items-center gap-1.5 text-[11px] font-mono text-white/50 hover:text-white transition-colors border border-white/10 px-3 py-1.5 rounded-lg bg-white/5"
+          >
+            <Shield className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+            Security Audit
+          </a>
           <a 
             href="#faq"
-            className="hidden sm:inline-flex items-center gap-1 text-[11px] text-white/50 hover:text-white transition-colors border border-white/10 px-3 py-1.5 rounded-lg bg-white/5"
+            className="inline-flex items-center gap-1.5 text-[11px] font-mono text-white/50 hover:text-white transition-colors border border-white/10 px-3 py-1.5 rounded-lg bg-white/5"
           >
             <HelpCircle className="w-3.5 h-3.5" />
-            Need help?
+            Help Guide
           </a>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 relative space-y-16">
         
-        {/* Welcome Hero Grid */}
+        {/* CINEMA STUDIO SUITE */}
+        <div className="space-y-16 w-full">
+          {/* Cinematic Header Banner */}
+          <div className="bg-gradient-to-r from-[#111420] via-[#0d0e15] to-[#090a0f] border border-white/10 rounded-3xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative overflow-hidden shadow-2xl">
+            <div className="absolute inset-0 bg-radial-gradient(ellipse_at_top_right,rgba(245,158,11,0.04),transparent_60%) pointer-events-none" />
+            <div className="space-y-2 relative z-10">
+              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono">
+                <Film className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                <span>Veo 3.1 Fast Cinematic Generator Active</span>
+              </div>
+              <h1 className="text-3xl md:text-4xl font-display font-extrabold text-white leading-tight">
+                FLUX.CINEMA <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-300">Creator Suite</span>
+              </h1>
+              <p className="text-xs md:text-sm text-white/60 max-w-2xl leading-relaxed">
+                Compose majestic video scripts and generate stunning high-fidelity preview frames. Use the Video Forge Master co-director below to brainstorm visual themes and write cinematic prompts.
+              </p>
+            </div>
+
+            {/* Status metrics widget */}
+            <div className="bg-black/40 border border-white/5 rounded-2xl p-4 flex gap-6 shrink-0 relative z-10 w-full md:w-auto font-mono text-xs">
+              <div>
+                <span className="text-white/40 block text-[9px] uppercase tracking-wider mb-1">Subscribers Rate</span>
+                <span className="text-amber-400 font-bold flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" /> $5.50/month
+                </span>
+              </div>
+              <div className="border-l border-white/10 pl-6">
+                <span className="text-white/40 block text-[9px] uppercase tracking-wider mb-1">Target Engine</span>
+                <span className="text-white font-bold block truncate max-w-[150px]">
+                  veo-3.1-fast-generate-preview
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Video Studio Generator & AI Chat Side-by-Side Panel */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            
+            {/* Left Column: Visual Generator Studio */}
+            <div className="lg:col-span-6 space-y-6" id="video-generator-panel">
+              <CinemaStudio 
+                activeVideoModel="veo-3.1-fast-generate-preview" 
+                onAddMetrics={(tokens, cost, saved) => {
+                  // Update telemetry metrics from video generation
+                  setBaselineMetrics(prev => ({
+                    ...prev,
+                    promptTokens: prev.promptTokens + tokens,
+                    completionTokens: prev.completionTokens + tokens,
+                    cost: prev.cost + cost,
+                    saved: prev.saved + saved
+                  }));
+                }}
+                videoPrompt={videoPrompt}
+                setVideoPrompt={setVideoPrompt}
+              />
+            </div>
+
+            {/* Right Column: Video Forge Master AI Chat Assistant */}
+            <div className="lg:col-span-6 space-y-6">
+              {renderChatPlayground()}
+            </div>
+
+          </div>
+
+          {/* SECURITY AUDIT SIMULATION DASHBOARD */}
+          <section id="security-audit" className="border-t border-white/5 pt-16 space-y-8 scroll-mt-20">
+            <div className="text-center space-y-3 max-w-3xl mx-auto">
+              <span className="text-[10px] uppercase font-mono tracking-widest text-amber-500 font-bold bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/15">
+                Active Cyber Security
+              </span>
+              <h2 className="text-2xl md:text-3xl font-display font-extrabold text-white">Active Node Hardening & Security Audit</h2>
+              <p className="text-sm text-white/50 leading-relaxed font-sans">
+                Verify secure interface bindings, audit communication ports on computing clusters, rotate API key signatures, and keep your co-director pipelines secure from unauthorized public queries.
+              </p>
+            </div>
+            <SecurityDashboard />
+          </section>
+
+          {/* Q&A SECTION */}
+          <section id="faq" className="border-t border-white/5 pt-16 space-y-8 scroll-mt-20">
+            
+            <div className="space-y-2">
+              <span className="text-[10px] uppercase font-mono tracking-widest text-amber-500 font-bold block">
+                Frequently Asked Questions
+              </span>
+              <h2 className="text-2xl font-display font-extrabold text-white">Cinema Studio Q&A</h2>
+              <p className="text-sm text-white/50 font-sans">Everything you need to know about generating cinematic preview frames and co-director chat parameters.</p>
+            </div>
+
+            {/* Accordion List */}
+            <div className="border border-white/10 rounded-2xl overflow-hidden bg-[#0c0e14] divide-y divide-white/5">
+              
+              {/* QA Item 1 */}
+              <div className="transition-all">
+                <button
+                  type="button"
+                  onClick={() => toggleFaq('faq-1')}
+                  className="w-full text-left px-6 py-4.5 flex justify-between items-center hover:bg-white/[0.01] transition-all cursor-pointer select-none"
+                >
+                  <span className="text-xs font-bold text-white md:text-sm">How does FLUX.CINEMA generate video previews?</span>
+                  {expandedFaq['faq-1'] ? (
+                    <ChevronUp className="w-4 h-4 text-amber-500" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-white/40" />
+                  )}
+                </button>
+                
+                <AnimatePresence initial={false}>
+                  {expandedFaq['faq-1'] && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-6 pb-5 text-xs text-white/60 leading-relaxed space-y-2 font-sans">
+                        <p>
+                          Our pipeline uses the bleeding-edge Veo 3.1 fast generation model. It renders high-fidelity starting and ending frames and bridges them with fluid temporal flow vectors. This gives creators a pristine, immediate feel of the visual output without waiting hours for raw rendering steps.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* QA Item 2 */}
+              <div className="transition-all">
+                <button
+                  type="button"
+                  onClick={() => toggleFaq('faq-2')}
+                  className="w-full text-left px-6 py-4.5 flex justify-between items-center hover:bg-white/[0.01] transition-all cursor-pointer select-none"
+                >
+                  <span className="text-xs font-bold text-white md:text-sm">Is my generated media private?</span>
+                  {expandedFaq['faq-2'] ? (
+                    <ChevronUp className="w-4 h-4 text-amber-500" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-white/40" />
+                  )}
+                </button>
+                
+                <AnimatePresence initial={false}>
+                  {expandedFaq['faq-2'] && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-6 pb-5 text-xs text-white/60 leading-relaxed font-sans">
+                        <p>
+                          Absolutely. Media generation uses end-to-end encrypted overlays. Your custom text prompts, storyboard configurations, and generated frame previews are routed through private, non-custodial cloud pipelines and compiled strictly within isolated temporary containers.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* QA Item 3 */}
+              <div className="transition-all">
+                <button
+                  type="button"
+                  onClick={() => toggleFaq('faq-3')}
+                  className="w-full text-left px-6 py-4.5 flex justify-between items-center hover:bg-white/[0.01] transition-all cursor-pointer select-none"
+                >
+                  <span className="text-xs font-bold text-white md:text-sm">What is the $5.50/month tier?</span>
+                  {expandedFaq['faq-3'] ? (
+                    <ChevronUp className="w-4 h-4 text-amber-500" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-white/40" />
+                  )}
+                </button>
+                
+                <AnimatePresence initial={false}>
+                  {expandedFaq['faq-3'] && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-6 pb-5 text-xs text-white/60 leading-relaxed font-sans">
+                        <p>
+                          The $5.50 Core subscription plan unlocks unlimited fast-rendering priority queues for Veo 3.1, raw 4K cinematic export, advanced co-director text-memory context, and secure multi-GPU cluster support for massive production pipelines.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* QA Item 4 */}
+              <div className="transition-all">
+                <button
+                  type="button"
+                  onClick={() => toggleFaq('faq-4')}
+                  className="w-full text-left px-6 py-4.5 flex justify-between items-center hover:bg-white/[0.01] transition-all cursor-pointer select-none"
+                >
+                  <span className="text-xs font-bold text-white md:text-sm">Can I use custom music cues with Veo 3.1?</span>
+                  {expandedFaq['faq-4'] ? (
+                    <ChevronUp className="w-4 h-4 text-amber-500" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-white/40" />
+                  )}
+                </button>
+                
+                <AnimatePresence initial={false}>
+                  {expandedFaq['faq-4'] && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-6 pb-5 text-xs text-white/60 leading-relaxed font-sans">
+                        <p>
+                          Yes! Under the sound configuration drawer inside Cinema Studio, you can specify emotional descriptors, instruments, and BPM sync values. Our backend mixes these parameters to render perfectly synchronized high-fidelity background scores.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+            </div>
+
+          </section>
+        </div>
+
+        {false && (
+          /* LM LINK MESH COORDINATOR MODE */
+          <div className="space-y-16">
+            
+            {/* Welcome Hero Grid */}
         <section id="hero-section" className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center pt-4">
           <div className="lg:col-span-7 space-y-6">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-400 text-xs font-mono">
@@ -801,6 +1328,293 @@ export default function App() {
                     Local Mode
                   </button>
                 </div>
+              </div>
+
+              {/* RESOURCE TELEMETRY & COST MONITOR DASHBOARD */}
+              <div className="bg-[#0c0e16] border border-white/10 rounded-2xl overflow-hidden relative shadow-xl">
+                <div className="absolute inset-0 bg-gradient-to-b from-[#161a2b]/20 to-transparent pointer-events-none" />
+                
+                {/* Dashboard Header Bar */}
+                <div className="border-b border-white/5 p-4 md:p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 relative z-10">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl">
+                      <Activity className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-display font-extrabold text-white flex items-center gap-1.5">
+                        Resource Telemetry & Cost Monitor
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      </h3>
+                      <p className="text-[11px] text-white/40 font-mono">Live bandwidth & token generation analytics</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 w-full sm:w-auto self-stretch sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Reset all to zero/defaults
+                        setBaselineMetrics({ promptTokens: 0, completionTokens: 0, cost: 0, saved: 0 });
+                        setChatMessages([]);
+                      }}
+                      className="flex-1 sm:flex-initial px-3 py-1.5 bg-white/5 hover:bg-red-500/10 border border-white/5 hover:border-red-500/20 text-[10px] font-mono font-bold rounded-lg text-white/60 hover:text-red-400 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Reset Metrics
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={() => setShowTelemetryDetails(!showTelemetryDetails)}
+                      className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/20 text-amber-400 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      {showTelemetryDetails ? "Hide Analytics" : "Expand Analytics"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4-Panel Overview Grid */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 border-b border-white/5 divide-x divide-y lg:divide-y-0 divide-white/5">
+                  
+                  {/* Panel 1: Accumulated Cost */}
+                  <div className="p-4 md:p-5 space-y-1">
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-white/40 block">Session Cost (USD)</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-mono font-bold text-emerald-400 tracking-tight">
+                        ${totalCost.toFixed(6)}
+                      </span>
+                      <span className="text-[10px] text-emerald-400/50 font-mono">USD</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-white/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span>{currentMode === 'local' ? 'Metal Loop: $0.00' : 'Remote API active'}</span>
+                    </div>
+                  </div>
+
+                  {/* Panel 2: Total Tokens */}
+                  <div className="p-4 md:p-5 space-y-1">
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-white/40 block">Tokens Processed</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-mono font-bold text-white tracking-tight">
+                        {totalTokens.toLocaleString()}
+                      </span>
+                      <span className="text-[9px] text-white/40 font-mono">tok</span>
+                    </div>
+                    <p className="text-[10px] text-white/40 font-mono leading-none">
+                      {totalPromptTokens.toLocaleString()} up • {totalCompletionTokens.toLocaleString()} down
+                    </p>
+                  </div>
+
+                  {/* Panel 3: Unified Memory Savings */}
+                  <div className="p-4 md:p-5 space-y-1">
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-white/40 block">Local Mode Savings</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-mono font-bold text-purple-400 tracking-tight">
+                        ${totalSaved.toFixed(6)}
+                      </span>
+                      <span className="text-[10px] text-purple-400/50 font-mono">USD</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-purple-400/60">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                      <span>{localComputeRatio.toFixed(0)}% Workloads Offloaded</span>
+                    </div>
+                  </div>
+
+                  {/* Panel 4: Active Rate Bandwidth */}
+                  <div className="p-4 md:p-5 space-y-1">
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-white/40 block">Active Model Rate</span>
+                    <div>
+                      <div className="text-xs font-mono text-amber-500 font-bold leading-normal truncate">
+                        {currentMode === 'local' ? 'Self-Hosted ($0.00)' : activeModel.split(' ')[0]}
+                      </div>
+                      <p className="text-[10px] text-white/40 font-mono mt-0.5">
+                        {currentMode === 'local' 
+                          ? 'Unified System Memory' 
+                          : `$${(modelRates[activeModel]?.input || 0).toFixed(2)} in / $${(modelRates[activeModel]?.output || 0).toFixed(2)} out per M-tok`
+                        }
+                      </p>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* ADVANCED TELEMETRY ANALYTICS (EXPANDABLE PANEL) */}
+                <AnimatePresence>
+                  {showTelemetryDetails && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="border-t border-white/5 bg-black/40 relative z-10"
+                    >
+                      <div className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        
+                        {/* LEFT COLUMN: Token Distribution & Rates Simulator */}
+                        <div className="lg:col-span-6 space-y-5">
+                          
+                          {/* Token IO Distribution Visualizer */}
+                          <div className="bg-[#0e111a] border border-white/5 rounded-xl p-4 space-y-3">
+                            <div className="flex justify-between items-center">
+                              <h4 className="text-[10px] font-mono uppercase tracking-widest text-white/70">Prompt vs Reply Distribution</h4>
+                              <span className="text-[9px] font-mono text-white/40">
+                                IO Ratio: {totalTokens > 0 ? ((totalPromptTokens / totalTokens) * 100).toFixed(0) : "0"}% / {totalTokens > 0 ? ((totalCompletionTokens / totalTokens) * 100).toFixed(0) : "0"}%
+                              </span>
+                            </div>
+
+                            {/* Customized Horizontal Bar Chart */}
+                            <div className="space-y-1.5">
+                              <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden flex">
+                                <div 
+                                  className="h-full bg-amber-500 transition-all duration-500" 
+                                  style={{ width: `${totalTokens > 0 ? (totalPromptTokens / totalTokens) * 100 : 40}%` }}
+                                  title={`Prompt Tokens: ${totalPromptTokens}`}
+                                />
+                                <div 
+                                  className="h-full bg-emerald-400 transition-all duration-500" 
+                                  style={{ width: `${totalTokens > 0 ? (totalCompletionTokens / totalTokens) * 100 : 60}%` }}
+                                  title={`Completion Tokens: ${totalCompletionTokens}`}
+                                />
+                              </div>
+                              <div className="flex justify-between text-[9px] font-mono text-white/30">
+                                <span className="flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                  Prompt: {totalPromptTokens.toLocaleString()} ({totalTokens > 0 ? ((totalPromptTokens / totalTokens) * 100).toFixed(1) : "0"}%)
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                  Reply: {totalCompletionTokens.toLocaleString()} ({totalTokens > 0 ? ((totalCompletionTokens / totalTokens) * 100).toFixed(1) : "0"}%)
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Interactive Rates Simulator Form */}
+                          <div className="bg-[#0e111a] border border-white/5 rounded-xl p-4 space-y-3">
+                            <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                              <div className="flex items-center gap-1.5">
+                                <Settings className="w-3.5 h-3.5 text-amber-500" />
+                                <h4 className="text-[10px] font-mono uppercase tracking-widest text-white/80">API/Hosting Rates Simulator</h4>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setIsEditingRates(!isEditingRates)}
+                                className="text-[9px] font-mono text-amber-500 hover:text-amber-400 font-bold"
+                              >
+                                {isEditingRates ? "Lock Pricing" : "Edit Pricing Matrix"}
+                              </button>
+                            </div>
+
+                            <div className="space-y-2 max-h-[160px] overflow-y-auto font-mono text-[10px] scrollbar-none pr-1">
+                              {Object.entries(modelRates).map(([model, rateObj]) => {
+                                const rate = rateObj as { input: number; output: number };
+                                return (
+                                  <div key={model} className="flex justify-between items-center bg-black/20 p-2 rounded border border-white/5">
+                                    <span className="text-white/70 font-semibold truncate max-w-[160px]" title={model}>{model.split(' ')[0]}</span>
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-white/30 text-[8px]">IN:</span>
+                                        {isEditingRates ? (
+                                          <input 
+                                            type="number" 
+                                            step="0.01"
+                                            min="0"
+                                            value={rate.input}
+                                            onChange={(e) => {
+                                              const val = parseFloat(e.target.value) || 0;
+                                              setModelRates(prev => ({
+                                                ...prev,
+                                                [model]: { ...prev[model], input: val }
+                                              }));
+                                            }}
+                                            className="w-12 bg-slate-950 border border-white/15 px-1 py-0.5 rounded text-center text-white"
+                                          />
+                                        ) : (
+                                          <span className="text-amber-500/80">${rate.input.toFixed(2)}</span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-white/30 text-[8px]">OUT:</span>
+                                        {isEditingRates ? (
+                                          <input 
+                                            type="number" 
+                                            step="0.01"
+                                            min="0"
+                                            value={rate.output}
+                                            onChange={(e) => {
+                                              const val = parseFloat(e.target.value) || 0;
+                                              setModelRates(prev => ({
+                                                ...prev,
+                                                [model]: { ...prev[model], output: val }
+                                              }));
+                                            }}
+                                            className="w-12 bg-slate-950 border border-white/15 px-1 py-0.5 rounded text-center text-white"
+                                          />
+                                        ) : (
+                                          <span className="text-emerald-400/80">${rate.output.toFixed(2)}</span>
+                                        )}
+                                      </div>
+                                      <span className="text-white/20 text-[8px]">/M</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <span className="text-[8px] text-white/30 block italic">Rates defined in USD per 1,000,000 processed tokens. All updates apply reactively.</span>
+                          </div>
+
+                        </div>
+
+                        {/* RIGHT COLUMN: Query Transaction Ledger */}
+                        <div className="lg:col-span-6 space-y-4">
+                          <div className="bg-[#0e111a] border border-white/5 rounded-xl p-4 space-y-3 flex flex-col h-full min-h-[295px]">
+                            <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                              <h4 className="text-[10px] font-mono uppercase tracking-widest text-white/80">Query Transaction Ledger</h4>
+                              <span className="text-[9px] font-mono text-white/40">Showing last {transactions.length} operations</span>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto space-y-2 max-h-[220px] scrollbar-none pr-1">
+                              {transactions.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-center text-white/20 font-mono text-[10px] py-12">
+                                  <span>No queries executed in current console session yet.</span>
+                                </div>
+                              ) : (
+                                transactions.map((t, idx) => (
+                                  <div key={t.id || idx} className="bg-black/20 border border-white/5 rounded p-2 flex justify-between items-center font-mono text-[9px]">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-white/80 font-bold">{t.model?.split(' ')[0]}</span>
+                                        <span className="text-white/20">•</span>
+                                        <span className="text-white/40">{t.timestamp}</span>
+                                      </div>
+                                      <div className="text-white/30 text-[8px]">
+                                        Tokens: {t.tokens?.prompt} prompt • {t.tokens?.completion} reply
+                                      </div>
+                                    </div>
+
+                                    <div className="text-right">
+                                      {t.isLocal ? (
+                                        <span className="text-purple-400 font-bold block bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/15">
+                                          Saved ${t.saved?.toFixed(6)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-emerald-400 font-bold block bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-500/15">
+                                          Charged ${t.cost?.toFixed(6)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Existing grid layout */}
@@ -1148,182 +1962,7 @@ export default function App() {
                 </div>
 
                 {/* THE CHAT PLAYGROUND */}
-                <div className="bg-[#0e111a] border border-white/10 rounded-2xl overflow-hidden flex flex-col h-[520px] shadow-2xl relative">
-                  
-                  {/* Chat Panel Header */}
-                  <div className="border-b border-white/5 px-5 py-4 bg-[#0a0c12] flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <div className="relative">
-                        <Terminal className={`w-4 h-4 ${currentMode === 'local' ? 'text-purple-400' : 'text-amber-500'}`} />
-                        <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full animate-ping ${currentMode === 'local' ? 'bg-purple-400' : 'bg-amber-400'}`} />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-white">
-                          {currentMode === 'local' ? 'Local Hardware Console Session' : 'Private Link Decrypted Session'}
-                        </h4>
-                        <span className="text-[10px] text-white/40 font-mono flex items-center gap-1">
-                          {currentMode === 'local' ? (
-                            <>
-                              <Lock className="w-3 h-3 text-purple-400 inline" /> Bypassing mesh network • Apple Metal hardware acceleration
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="w-3 h-3 text-amber-500 inline" /> Direct peer-to-peer connection is encrypted end-to-end
-                            </>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setChatMessages([])}
-                      className="text-[9px] font-mono text-white/30 hover:text-white flex items-center gap-1 hover:bg-white/5 px-2 py-1 rounded"
-                      title="Clear session history"
-                    >
-                      <Trash2 className="w-3 h-3" /> Clear Console
-                    </button>
-                  </div>
-
-                  {/* Packet flow routing animation banner */}
-                  <div className="bg-black/40 border-b border-white/5 px-5 py-1.5 text-[9px] font-mono text-white/30 flex justify-between items-center relative overflow-hidden">
-                    <span className="flex items-center gap-1">
-                      <span className={`w-1.5 h-1.5 rounded-full ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} />
-                      Client: Localhost
-                    </span>
-                    
-                    {/* Tunnel line graphic */}
-                    <div className="flex-1 mx-4 h-[1px] relative flex items-center bg-white/5">
-                      <span className={`h-1 absolute rounded-full transition-all duration-1000 ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'} ${dataPacketPulse ? 'w-full animate-pulse' : 'w-0'}`} />
-                    </div>
-
-                    <span className={`flex items-center gap-1 ${currentMode === 'local' ? 'text-purple-400' : 'text-amber-500/80'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${currentMode === 'local' ? 'bg-purple-400' : 'bg-amber-400'}`} />
-                      {currentMode === 'local' ? 'Direct metal system bus loopback' : `Remote: ${devices.find(d => d.id === selectedDeviceId)?.name.split(' ')[0] || 'Node'}`}
-                    </span>
-                  </div>
-
-                  {/* Chat Messages Log */}
-                  <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                    {chatMessages.length === 0 ? (
-                      <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
-                        <Terminal className="w-10 h-10 text-white/10" />
-                        <div className="space-y-1">
-                          <p className="text-xs font-mono text-white/40">Secure Console established.</p>
-                          <p className="text-[11px] text-white/30">
-                            {currentMode === 'local' 
-                              ? "Your chats are processed strictly locally. Large parameters are computed on local system memory via Apple Metal (MPS)."
-                              : "Your chats are processed strictly locally. Heavy parameters are computed on your linked remote hardware."
-                            }
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      chatMessages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`flex flex-col space-y-1.5 ${
-                            msg.role === 'user' ? 'items-end' : 'items-start'
-                          }`}
-                        >
-                          {/* Message Metadata line */}
-                          <div className="flex items-center gap-2 text-[9px] font-mono text-white/30 px-1">
-                            <span>{msg.timestamp}</span>
-                            {msg.role === 'assistant' && (
-                              <>
-                                <span>•</span>
-                                <span className={`${currentMode === 'local' ? 'text-purple-400' : 'text-amber-500'} font-semibold`}>{msg.modelUsed}</span>
-                                <span>•</span>
-                                <span className="text-white/40 uppercase">{msg.deviceUsed?.split(' ')[0]}</span>
-                              </>
-                            )}
-                          </div>
-
-                          {/* Message bubble */}
-                          <div
-                            className={`max-w-[85%] rounded-xl px-4 py-3 text-xs leading-relaxed ${
-                              msg.role === 'user'
-                                ? currentMode === 'local'
-                                  ? 'bg-purple-600/10 border border-purple-500/20 text-white'
-                                  : 'bg-amber-600/10 border border-amber-500/20 text-white'
-                                : 'bg-white/[0.03] border border-white/5 text-white/90'
-                            }`}
-                          >
-                            {msg.content}
-                          </div>
-
-                          {/* Connection Latency indicator */}
-                          {msg.role === 'assistant' && msg.latencyMs && (
-                            <span className={`text-[8px] font-mono px-1 ${currentMode === 'local' ? 'text-purple-400/60' : 'text-amber-500/60'}`}>
-                              {currentMode === 'local' ? (
-                                <>⚡ Connection latency: 0.12ms (Direct system bus loopback) • Local system RAM</>
-                              ) : (
-                                <>⚡ Connection roundtrip: {msg.latencyMs}ms • End-to-end Encrypted Tunnel</>
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      ))
-                    )}
-
-                    {/* Pending state */}
-                    {isGenerating && (
-                      <div className="flex flex-col space-y-1.5 items-start">
-                        <div className={`flex items-center gap-2 text-[9px] font-mono ${currentMode === 'local' ? 'text-purple-400/60' : 'text-amber-500/60'}`}>
-                          <RefreshCw className="w-3 h-3 animate-spin" />
-                          <span>
-                            {currentMode === 'local' ? 'Streaming local token sequence from system RAM...' : 'Routing packets via Tailscale private mesh...'}
-                          </span>
-                        </div>
-                        <div className="bg-white/[0.02] border border-white/5 rounded-xl px-4 py-3 text-xs text-white/50 italic flex items-center gap-2">
-                          <span className="flex gap-1">
-                            <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} style={{ animationDelay: '0ms' }} />
-                            <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} style={{ animationDelay: '150ms' }} />
-                            <span className={`w-1.5 h-1.5 rounded-full animate-bounce ${currentMode === 'local' ? 'bg-purple-500' : 'bg-amber-500'}`} style={{ animationDelay: '300ms' }} />
-                          </span>
-                          {currentMode === 'local' ? 'Local Apple MPS inference executing...' : 'Remote inference executing...'}
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div ref={chatEndRef} />
-                  </div>
-
-                  {/* Error alerts inside chat box */}
-                  {errorMessage && (
-                    <div className="mx-5 mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex gap-2.5 text-xs text-red-400">
-                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <p className="font-semibold">Private Link Timeout Error</p>
-                        <p className="text-[11px] text-red-400/80">{errorMessage}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Message submission form */}
-                  <form onSubmit={handleSendMessage} className="p-4 bg-[#0a0c12] border-t border-white/5 flex gap-2.5">
-                    <input
-                      type="text"
-                      required
-                      value={inputMessage}
-                      onChange={(e) => setInputMessage(e.target.value)}
-                      disabled={isGenerating || isSwappingModel}
-                      placeholder={
-                        isSwappingModel 
-                          ? "Please wait for model load to complete..." 
-                          : `Type a prompt to send securely to local ${activeModel.split(' ')[0]}...`
-                      }
-                      className={`flex-1 bg-[#090a0f] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white outline-none placeholder:text-white/20 font-mono disabled:opacity-40 transition-colors ${currentMode === 'local' ? 'focus:border-purple-500/40' : 'focus:border-amber-500/40'}`}
-                    />
-                    <button
-                      type="submit"
-                      disabled={!inputMessage.trim() || isGenerating || isSwappingModel}
-                      className={`p-2.5 rounded-xl font-bold disabled:opacity-30 cursor-pointer transition-all active:scale-95 flex items-center justify-center shrink-0 ${currentMode === 'local' ? 'bg-purple-500 hover:bg-purple-400 text-white shadow-md shadow-purple-500/10' : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/10'}`}
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </form>
-                </div>
+                {renderChatPlayground()}
 
               </div>
 
@@ -1331,6 +1970,8 @@ export default function App() {
           </div>
           )}
         </section>
+        </div>
+        )}
 
 
         {/* VISUAL ILLUSTRATION: "How it works" */}
@@ -1498,6 +2139,20 @@ export default function App() {
 
           </div>
 
+        </section>
+
+        {/* SECURITY AUDIT SIMULATION DASHBOARD */}
+        <section id="security-audit" className="border-t border-white/5 pt-16 space-y-8 scroll-mt-20">
+          <div className="text-center space-y-3 max-w-3xl mx-auto">
+            <span className="text-[10px] uppercase font-mono tracking-widest text-amber-500 font-bold bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/15">
+              Secure Guard Nodes
+            </span>
+            <h2 className="text-2xl md:text-3xl font-display font-extrabold text-white">Active Node Hardening & Security Audit</h2>
+            <p className="text-sm text-white/50 leading-relaxed">
+              Verify WireGuard interface bindings, audit open ports on active remote GPUs, rotate outdated credentials, and keep your peer-to-peer overlay secure from potential public discovery.
+            </p>
+          </div>
+          <SecurityDashboard />
         </section>
 
         {/* Q&A SECTION */}
@@ -1722,14 +2377,170 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-white/5 bg-[#07090d] py-12 px-6 mt-20 text-center font-mono text-[10px] text-white/30 space-y-4">
-        <div className="flex justify-center items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-          <span>LM Studio Dev Portal • Private Secure Overlay Services</span>
+      <footer className="border-t border-white/5 bg-[#07090d] pt-16 pb-12 px-6 md:px-12 mt-20 relative overflow-hidden">
+        <div className="absolute inset-0 bg-radial-gradient(circle_at_bottom,rgba(245,158,11,0.02),transparent_70%) pointer-events-none" />
+        
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 relative z-10">
+          
+          {/* Column 1: Studio Info */}
+          <div className="space-y-4 text-left">
+            <div className="flex items-center gap-2">
+              <Film className="w-5 h-5 text-amber-500" />
+              <span className="text-sm font-display font-extrabold text-white tracking-tight">FLUX.CINEMA</span>
+            </div>
+            <p className="text-[11px] font-mono text-white/40 leading-relaxed">
+              Decentralized video studio pipeline powered by Veo 3.1 & private mesh overlays. Forge high-fidelity cinematic assets directly on local and cluster hardware nodes.
+            </p>
+            <div className="flex items-center gap-2 pt-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[9px] font-mono text-emerald-400/80">All nodes online & decrypted</span>
+            </div>
+          </div>
+
+          {/* Column 2: Licensing & Legals */}
+          <div className="space-y-3 font-mono text-xs text-left">
+            <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Licensing & Terms</h4>
+            <ul className="space-y-2 text-[10px] text-white/40">
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('legal'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  End User License (EULA)
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('legal'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Asset Usage License
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('legal'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Privacy Policy & VPN Overlay
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('legal'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Terms of Overlay Operations
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          {/* Column 3: Pricing & Affiliate */}
+          <div className="space-y-3 font-mono text-xs text-left">
+            <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Plans & Programs</h4>
+            <ul className="space-y-2 text-[10px] text-white/40">
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('pricing'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  Subscription Core ($5.50/mo)
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('pricing'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Enterprise Cluster Pricing
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('affiliate'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left flex items-center gap-1.5"
+                >
+                  <Users className="w-3 h-3 text-purple-400" />
+                  Referral/Affiliate Program
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('affiliate'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Earn 15% Recurring Payout
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          {/* Column 4: Contact & Hotlines */}
+          <div className="space-y-3 font-mono text-xs text-left">
+            <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Contact & Support</h4>
+            <ul className="space-y-2 text-[10px] text-white/40">
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('contact'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Support: support@fluxcinema.io
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('contact'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Solutions Desk (Enterprise)
+                </button>
+              </li>
+              <li>
+                <button 
+                  type="button" 
+                  onClick={() => { setActiveModal('contact'); }}
+                  className="hover:text-amber-400 transition-colors cursor-pointer text-left"
+                >
+                  Submit Bug/Telemetry Report
+                </button>
+              </li>
+              <li>
+                <span className="text-white/20 select-none">
+                  Filing Desk IP: 127.0.0.1 (Overlay)
+                </span>
+              </li>
+            </ul>
+          </div>
+
         </div>
-        <p className="max-w-md mx-auto text-white/20">
-          Tailscale is a trademark of Tailscale, Inc. WireGuard is a registered trademark of Jason A. Donenfeld. All data transfer is computed on device clusters.
-        </p>
+
+        {/* Legal Filing Separator */}
+        <div className="max-w-7xl mx-auto mt-12 pt-8 border-t border-white/5 space-y-4 text-center font-mono text-[10px]">
+          <div className="flex justify-center items-center gap-2 text-white/40">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            <span className="font-bold">LM Studio Dev Portal • Private Secure Overlay Services</span>
+          </div>
+          
+          <p className="max-w-2xl mx-auto text-white/20 leading-relaxed">
+            Tailscale is a trademark of Tailscale, Inc. WireGuard is a registered trademark of Jason A. Donenfeld. All data transfer is computed on device clusters.
+          </p>
+          
+          <div className="text-[9px] text-white/10">
+            © 2026 FLUX.CINEMA Inc. All rights reserved. Encrypted mesh tunnel system v1.2.9-Preview.
+          </div>
+        </div>
       </footer>
 
       {/* Transition Modal Overlay */}
@@ -1798,6 +2609,346 @@ export default function App() {
                     />
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Interactive Bottom Modals */}
+      <AnimatePresence>
+        {activeModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-[#07090d]/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
+            onClick={() => setActiveModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-[#0e111a] border border-white/10 rounded-3xl w-full max-w-2xl p-6 md:p-8 space-y-6 shadow-2xl relative overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Radial glow background effect */}
+              <div className="absolute inset-0 bg-radial-gradient(circle_at_top,rgba(245,158,11,0.05),transparent_70%) pointer-events-none" />
+              
+              {/* Modal Header */}
+              <div className="flex justify-between items-center pb-4 border-b border-white/5 relative z-10">
+                <div className="flex items-center gap-2">
+                  {activeModal === 'pricing' && <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" />}
+                  {activeModal === 'affiliate' && <Users className="w-5 h-5 text-purple-400" />}
+                  {activeModal === 'legal' && <Shield className="w-5 h-5 text-blue-400" />}
+                  {activeModal === 'contact' && <HelpCircle className="w-5 h-5 text-emerald-400" />}
+                  <h3 className="text-xs md:text-sm font-mono font-bold uppercase tracking-wider text-white">
+                    {activeModal === 'pricing' && 'Subscription Core & Pricing Options'}
+                    {activeModal === 'affiliate' && 'Creator Affiliate & Referrals'}
+                    {activeModal === 'legal' && 'Legal & Asset Licensing'}
+                    {activeModal === 'contact' && 'Dev Portal Solutions Hotline'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="text-white/40 hover:text-white font-mono text-[10px] uppercase hover:bg-white/5 px-2 py-1 rounded cursor-pointer transition-colors"
+                >
+                  [CLOSE]
+                </button>
+              </div>
+
+              {/* Modal Body Content */}
+              <div className="relative z-10 max-h-[60vh] overflow-y-auto pr-2 scrollbar-none">
+                
+                {/* PRICING MODAL CONTENT */}
+                {activeModal === 'pricing' && (
+                  <div className="space-y-6">
+                    <p className="text-xs text-white/60 leading-relaxed font-mono">
+                      FLUX.CINEMA runs on high-end device clusters to compute majestic video frames instantly. Choose the tier that matches your creative volume:
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+                      {/* Tier 1 */}
+                      <div className="bg-black/30 border border-white/5 p-4 rounded-2xl flex flex-col justify-between space-y-4">
+                        <div className="space-y-1.5">
+                          <span className="text-[9px] text-white/40 uppercase">Starter Pack</span>
+                          <h4 className="text-xs font-bold text-white uppercase">Preview Beta</h4>
+                          <p className="text-xl font-extrabold text-white/50">$0.00 <span className="text-[10px] text-white/30 font-normal">/mo</span></p>
+                          <ul className="space-y-1 text-[9px] text-white/40 pt-2 list-disc pl-3">
+                            <li>720p Render Max</li>
+                            <li>5 concurrent tasks</li>
+                            <li>Standard queue wait</li>
+                          </ul>
+                        </div>
+                        <span className="text-[9px] text-center bg-white/5 text-white/40 py-1 rounded-lg">Active Plan</span>
+                      </div>
+
+                      {/* Tier 2 */}
+                      <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-2xl flex flex-col justify-between space-y-4 relative">
+                        <span className="absolute -top-2.5 right-4 bg-amber-500 text-slate-950 font-bold text-[8px] px-2 py-0.5 rounded-full uppercase font-mono">Popular</span>
+                        <div className="space-y-1.5">
+                          <span className="text-[9px] text-amber-400 uppercase font-bold">Creator Core</span>
+                          <h4 className="text-xs font-bold text-white uppercase">Veo 3.1 Suite</h4>
+                          <p className="text-xl font-extrabold text-amber-400">$5.50 <span className="text-[10px] text-white/40 font-normal">/mo</span></p>
+                          <ul className="space-y-1 text-[9px] text-white/60 pt-2 list-disc pl-3">
+                            <li>1080p Cinematic HD</li>
+                            <li>Priority GPU processing</li>
+                            <li>Unlimited Forgebot assistance</li>
+                            <li>First/Last Frame guidance</li>
+                          </ul>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => alert("Creator Core Plan simulation activated successfully!")}
+                          className="text-[9px] text-center bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          Upgrade Now
+                        </button>
+                      </div>
+
+                      {/* Tier 3 */}
+                      <div className="bg-purple-500/5 border border-purple-500/20 p-4 rounded-2xl flex flex-col justify-between space-y-4">
+                        <div className="space-y-1.5">
+                          <span className="text-[9px] text-purple-400 uppercase font-bold font-mono">Enterprise Mesh</span>
+                          <h4 className="text-xs font-bold text-white uppercase">Cluster Grid</h4>
+                          <p className="text-xl font-extrabold text-purple-400">Custom <span className="text-[10px] text-white/30 font-normal">/mo</span></p>
+                          <ul className="space-y-1 text-[9px] text-white/40 pt-2 list-disc pl-3">
+                            <li>Custom local/remote meshes</li>
+                            <li>Dedicated Cloud GPU cluster</li>
+                            <li>SSO / Private VPN tunnel SLA</li>
+                            <li>24/7 Priority support hotline</li>
+                          </ul>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveModal('contact');
+                            setContactSubject('enterprise');
+                          }}
+                          className="text-[9px] text-center bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 font-bold py-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          Request Demo
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-[8px] text-white/30 italic font-mono text-center">
+                      * All prices listed are in USD. Subscriptions are billed monthly. Access is secured instantly using our Private secure overlay nodes.
+                    </p>
+                  </div>
+                )}
+
+                {/* AFFILIATE MODAL CONTENT */}
+                {activeModal === 'affiliate' && (
+                  <div className="space-y-5 font-mono text-xs">
+                    <p className="text-xs text-white/60 leading-relaxed">
+                      Forge visual concepts, share the workspace link, and earn money! Get **15% recurring payouts** for every subscription referral that upgrades to our Creator plans.
+                    </p>
+
+                    <div className="bg-black/30 border border-white/5 rounded-2xl p-5 space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-white/40 uppercase block font-bold">Configure Custom Referrer Handle</label>
+                        <div className="flex gap-2">
+                          <span className="bg-white/5 border border-white/10 px-3 py-2 rounded-xl text-white/30 flex items-center text-[10px]">
+                            flux.cinema/ref?code=
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="creatorname"
+                            value={affiliateCode}
+                            onChange={(e) => {
+                              setAffiliateCode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""));
+                              setCopiedAffiliate(false);
+                            }}
+                            className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-4 py-2 text-white outline-none focus:border-purple-500/40 text-[11px]"
+                          />
+                        </div>
+                      </div>
+
+                      {affiliateCode.trim() && (
+                        <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl flex justify-between items-center">
+                          <div className="space-y-0.5">
+                            <span className="text-[8px] text-purple-300 uppercase block font-bold">Your Custom Invite Link</span>
+                            <span className="text-[10px] text-white select-all">
+                              https://flux.cinema/ref?code={affiliateCode}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(`https://flux.cinema/ref?code=${affiliateCode}`);
+                              setCopiedAffiliate(true);
+                              setTimeout(() => setCopiedAffiliate(false), 2000);
+                            }}
+                            className="bg-purple-500 hover:bg-purple-400 text-white font-bold text-[9px] px-3 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer"
+                          >
+                            {copiedAffiliate ? '✅ Copied!' : 'Copy Link'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-white font-bold text-xs uppercase">Program details & guidelines:</h4>
+                      <ul className="space-y-1.5 text-[10px] text-white/50 list-disc pl-4 leading-relaxed">
+                        <li>**15% Lifetime Recurring**: As long as your referred subscriber is active, you keep receiving 15% of their core fees month after month.</li>
+                        <li>**Cookie Window**: We track visitor cookies for 60 full days. If they sign up anytime inside that window, you get credited.</li>
+                        <li>**Cluster Dashboard**: Payout metrics update on the first business day of each month securely over the mesh. Payouts processed via secure wire transfer.</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+                {/* LEGAL MODAL CONTENT */}
+                {activeModal === 'legal' && (
+                  <div className="space-y-5 text-white/70 text-xs leading-relaxed font-mono">
+                    
+                    <div className="space-y-2">
+                      <h4 className="text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5 text-blue-400" />
+                        1. End User License Agreement (EULA)
+                      </h4>
+                      <p className="text-[10px] text-white/50 pl-5">
+                        Subject to the terms and parameters specified inside the LM Studio Dev Portal, users are granted a non-exclusive, personal, and revocable overlay computation license. All generations computed on localized GPU device clusters are private and owned entirely by the generating party under MIT terms, provided no copyright-restricted source frames are passed.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-amber-500" />
+                        2. Privacy Policy & VPN Overlays
+                      </h4>
+                      <p className="text-[10px] text-white/50 pl-5">
+                        Privacy is the fundamental cornerstone of FLUX.CINEMA. Video assets, prompt workflows, and direct model parameters are routed exclusively via end-to-end encrypted peer-to-peer (P2P) VPN tunnels. Tailscale virtual network configurations and WireGuard network keys prevent any centralized visibility, ensuring your creative concepts and assets never hit third-party cloud data warehouses without explicit instructions.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5 text-purple-400" />
+                        3. Trademark and Technology Attribution
+                      </h4>
+                      <p className="text-[10px] text-white/50 pl-5 bg-black/20 p-3 rounded-xl border border-white/5">
+                        Tailscale is a trademark of Tailscale, Inc. WireGuard is a registered trademark of Jason A. Donenfeld. All data transfer is computed securely on decentralized device clusters. We have no affiliation, direct partnership, or sponsorship with either trademark owner outside standard system implementations.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5 text-emerald-400" />
+                        4. Secure Telemetry Regulations
+                      </h4>
+                      <p className="text-[10px] text-white/50 pl-5">
+                        We periodically capture anonymized latency telemetry data to improve peer packet routing performance on overlay grids. All network diagnostic data is scrubbed of individual device metadata and stored securely in localized system storage configurations.
+                      </p>
+                    </div>
+
+                  </div>
+                )}
+
+                {/* CONTACT MODAL CONTENT */}
+                {activeModal === 'contact' && (
+                  <div className="space-y-5 font-mono text-xs">
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-white/60">
+                      <div className="bg-black/30 border border-white/5 p-4 rounded-xl space-y-1.5">
+                        <h4 className="text-white font-bold text-xs uppercase">General Solutions Desk</h4>
+                        <p className="text-[10px]">Direct Support Email:</p>
+                        <p className="text-amber-400 font-bold select-all text-[11px]">support@fluxcinema.io</p>
+                        <p className="text-[8px] text-white/30">Average response: &lt; 2 hours</p>
+                      </div>
+
+                      <div className="bg-black/30 border border-white/5 p-4 rounded-xl space-y-1.5">
+                        <h4 className="text-white font-bold text-xs uppercase text-left">Enterprise Overlay Hotline</h4>
+                        <p className="text-[10px] text-left">Solutions Routing Partner:</p>
+                        <p className="text-purple-400 font-bold select-all text-[11px] text-left">solutions@fluxcinema.io</p>
+                        <p className="text-[8px] text-white/30 text-left">Referral Contact: ethinxsolutions.au@gmail.com</p>
+                      </div>
+                    </div>
+
+                    {contactFormSubmitted ? (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-center space-y-2"
+                      >
+                        <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto animate-bounce" />
+                        <h4 className="text-white font-bold text-xs">Secure Ticket Transmitted!</h4>
+                        <p className="text-[10px] text-emerald-300">
+                          Your message has been compiled, encrypted, and filed securely inside our Support Desk database node.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setContactFormSubmitted(false);
+                            setContactMessage("");
+                          }}
+                          className="text-[9px] bg-emerald-500/20 hover:bg-emerald-500/30 text-white font-bold px-3 py-1.5 rounded-lg mt-2 transition-colors cursor-pointer"
+                        >
+                          Send Another Message
+                        </button>
+                      </motion.div>
+                    ) : (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          setContactFormSubmitted(true);
+                        }}
+                        className="space-y-4"
+                      >
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] text-white/40 uppercase block">Your Email Address</label>
+                            <input
+                              type="email"
+                              required
+                              placeholder="creator@studio.com"
+                              value={contactEmail}
+                              onChange={(e) => setContactEmail(e.target.value)}
+                              className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-2 text-white outline-none focus:border-amber-500/40 text-[11px]"
+                            />
+                          </div>
+
+                          <div className="space-y-1 text-left">
+                            <label className="text-[9px] text-white/40 uppercase block">Inquiry Subject</label>
+                            <select
+                              value={contactSubject}
+                              onChange={(e) => setContactSubject(e.target.value)}
+                              className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-2 text-white outline-none focus:border-amber-500/40 text-[11px]"
+                            >
+                              <option value="general">General Client Support</option>
+                              <option value="enterprise">Enterprise Custom Tunnel Mesh</option>
+                              <option value="billing">Affiliate / Referrer Payout Query</option>
+                              <option value="bug">Vulnerability / Bug Report</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1 text-left">
+                          <label className="text-[9px] text-white/40 uppercase block">Detailed Message</label>
+                          <textarea
+                            required
+                            rows={3}
+                            placeholder="Write your technical request or question here securely..."
+                            value={contactMessage}
+                            onChange={(e) => setContactMessage(e.target.value)}
+                            className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-2.5 text-white outline-none focus:border-amber-500/40 resize-none text-[11px]"
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl transition-all active:scale-[0.98] cursor-pointer text-center text-[11px] uppercase tracking-wider"
+                        >
+                          Send Secure Support Message
+                        </button>
+                      </form>
+                    )}
+
+                  </div>
+                )}
+
               </div>
             </motion.div>
           </motion.div>
